@@ -12,7 +12,7 @@ import urllib.parse
 from bisect import *
 from array import *
 
-mzFile = "/hd2/lukask/ms/graphtest/PXD028735/converted/LFQ_Orbitrap_DDA_Yeast_01.mzML"
+mzFile = "../data/converted/LFQ_Orbitrap_DDA_Yeast_01.mzML"
 mzScan = 32688
 psmPeptide = "IANVQSQLEK"
 precursorCharge = 2
@@ -99,17 +99,20 @@ def right_path(peptide,f,t,c):
     _b_max = list(set(t))[-2] # last b-ion
     _b_loc, _y_loc = 0, list(set(t))[-1]  # initiating to first b- and last y-ion
     # matching forward
-    for _pos in range(len(peptide)-1):
+    _pos = 0
+    while _pos < len(peptide):
         residues = peptide[_pos:min(_pos+4,len(peptide))]
         print(_pos,residues)
         _b_indeces = [i for i, x in enumerate(f) if x == _b_loc]
-        print(_b_indeces)
+        print(_b_indeces, [c[_ix] for _ix in _b_indeces])
         _b_to = [t[_ix] for _ix in _b_indeces if residues.startswith(c[_ix])]
+        _b_char = [c[_ix] for _ix in _b_indeces if residues.startswith(c[_ix])]
         if len(_b_to)==0:
             print(f"No match for b pos={_pos}, residues={residues}")
             break
-        print("b matches ", [c[_ix] for _ix in _b_indeces if residues.startswith(c[_ix])])
+        print("b matches ", _b_char,_b_to)
         _b_loc = _b_to[0] # Take the first (lightest)
+        _pos += len(_b_char[0]) # move forward according to lentht of match
     # matching backward
     for _pos in range(len(peptide),0,-1):
         residues = peptide[max(0,_pos-4):_pos]
