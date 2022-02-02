@@ -13,12 +13,12 @@ from bisect import *
 from array import *
 
 mzFile = "/hd2/lukask/ms/graphtest/PXD028735/converted/LFQ_Orbitrap_DDA_Yeast_01.mzML"
-mzScan = 99217
-psmPeptide = "LPNGLEYEQPTGLFINNK"
+mzScan = 32688
+psmPeptide = "IANVQSQLEK"
 precursorCharge = 2
 
 print(f"Trying to recreate {psmPeptide} with mass {mass.calculate_mass(psmPeptide):1.2f}") 
-fragment_tol_mass = 50
+fragment_tol_mass = 200
 fragment_tol_mode = 'ppm'
 
 single_aa_mass = {aa[0]:comp.mass() for aa, comp in mass.std_aa_comp.items() if len(aa)==1 and aa != 'I'}
@@ -95,12 +95,15 @@ def brute_force(f,t,c,goto=0,peptide=""):
             brute_force(f,t,c,_to,_current_peptide)
 
 def right_path(peptide,f,t,c):
+    peptide = peptide.replace("I","L")
     _b_max = list(set(t))[-2] # last b-ion
     _b_loc, _y_loc = 0, list(set(t))[-1]  # initiating to first b- and last y-ion
     # matching forward
     for _pos in range(len(peptide)-1):
         residues = peptide[_pos:min(_pos+4,len(peptide))]
+        print(_pos,residues)
         _b_indeces = [i for i, x in enumerate(f) if x == _b_loc]
+        print(_b_indeces)
         _b_to = [t[_ix] for _ix in _b_indeces if residues.startswith(c[_ix])]
         if len(_b_to)==0:
             print(f"No match for b pos={_pos}, residues={residues}")
