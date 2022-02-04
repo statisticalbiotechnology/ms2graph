@@ -11,13 +11,13 @@ import urllib.parse
 
 from bisect import *
 from array import *
-
+percolatorFile = "../data/crux-output/percolator.target.psms.txt"
 mzFile = "../data/converted/LFQ_Orbitrap_DDA_Yeast_01.mzML"
 mzScan = 32688
 psmPeptide = "IANVQSQLEK"
 precursorCharge = 2
 
-print(f"Trying to recreate {psmPeptide} with mass {mass.calculate_mass(psmPeptide):1.2f}") 
+print(f"Recreate {psmPeptide} with mass {mass.calculate_mass(psmPeptide):1.2f}") 
 fragment_tol_mass = 10
 fragment_tol_mode = 'ppm'
 
@@ -29,15 +29,24 @@ std_aa_mass = dict(sorted({ **single_aa_mass, **double_aa_mass, **tripple_aa_mas
 #std_aa_mass = dict(sorted(single_aa_mass.items(), key=lambda item: item[1]))
 aa_mass = array('d',std_aa_mass.values())
 aa_ix = list(std_aa_mass.keys())
-#print(aa_mass)
-#print([chr(aa) for aa in aa_ix])
-#print(mass.std_aa_comp)
-#n_term_mass = mass.fast_mass("G", ion_type='b', charge=1)-aa_mass[0]
-#c_term_mass = mass.fast_mass("G", ion_type='y', charge=1)-aa_mass[0]
-#print(n_term_mass, c_term_mass)
-frag_charge = 1 # We look at the b1+ and y1+ series
+frag_charge = 1
 n_term_mass = mass.Composition({'H+': frag_charge}).mass()
 c_term_mass = mass.Composition({'O': 1, 'H': 2, 'H+': frag_charge}).mass()
+
+def readPSMs(fileName, specFileIndex="0", fdrTreshold=0.01):
+    scan2charge = {}
+    scan2peptide = {}
+    with open(fileName,"r") as reader:
+        for line in reader:
+            words = line.split('\t')
+            if words[0] == specFileIndex:
+                if float(words[7])<=fdrTreshold:
+                    scan = int(words[1])
+                    scan2charge[scan] = int(words[2])
+                    scan2peptide[scan] = words[10]
+                else:
+                    break
+    return scan2charge, scan2peptide
 
 def find_diff(difference, tolerance, aa_masses = aa_mass, aa_index = aa_ix):
     if difference <= aa_mass[0] - tolerance:
@@ -88,48 +97,65 @@ def brute_force(f,t,c,goto=0,peptide=""):
                 return
             brute_force(f,t,c,_to,_current_peptide)
 
-def right_path(peptide, f, t, c, peaks):
+def oriented_match(long_str, short_str, orientation):
+    if orientation == 1:
+        return long_str.startswith(short_str)
+    else:
+        return long_str.endswith(short_str)
+
+def right_path(peptide, f, t, c, orientation, peaks):
     peptide = peptide.replace("I","L")
-    _b_max = list(set(t))[-2] # last b-ion
-    _b_loc, _y_loc = 0, list(set(f))[1]  # initiating to first b- and y-ion
+    _ion_type = "b" if orientation == 1 else "y"
+    _ion_nr = 1
+    _peak_max = list(set(t))[-2 if orientation ==1 else -1 ] # peak for last b/y-ion
+    _loc = 0 if orientation == 1 else 1
     # matching forward
-    _pos = 0
-    while _pos < len(peptide):
-        residues = peptide[_pos:min(_pos+4,len(peptide))]
-        print(f"From pos {_pos} and peak at {peaks[_b_loc]:1.3f} (peak index {_b_loc}) searching string {residues} i.e. the b{_pos+1}-ion")
-        _b_indeces = [i for i, x in enumerate(f) if x == _b_loc]
+    while _ion_nr <= len(peptide):
+        if orientation == 1:
+            residues = peptide[_ion_nr-1:min(_ion_nr+3,len(peptide))]
+        else:
+            residues = peptide[max(0,len(peptide) - _ion_nr - 3):len(peptide) - _ion_nr + 1]
+        print(f"From peak at {peaks[_loc]:1.3f} (peak index {_loc}) searching string {residues} i.e. the {_ion_type}{_ion_nr}-ion")
+        _indeces = [i for i, x in enumerate(f) if x == _loc]
         # print(_b_indeces, [c[_ix] for _ix in _b_indeces])
-        _b_to = [t[_ix] for _ix in _b_indeces if residues.startswith(c[_ix])]
-        _b_char = [c[_ix] for _ix in _b_indeces if residues.startswith(c[_ix])]
-        if len(_b_to)==0:
-            print(f"No match for b pos={_pos}, residues={residues}")
+        _to = [t[_ix] for _ix in _indeces if oriented_match(residues,c[_ix], orientation)]
+        _char = [c[_ix] for _ix in _indeces if oriented_match(residues,c[_ix], orientation)]
+        if len(_to)==0:
+            print(f"No match for {_ion_type} ion nr={_ion_nr}, residues={residues}")
+            remainder = peptide[_ion_nr-1:len(peptide)] if orientation == 1 else peptide[0:len(peptide) - _ion_nr + 1]
+            print(f"Matching remainding {remainder}")
             break
-        print("b matches ", _b_char,_b_to, [peaks[ix] for ix in _b_to ])
-        _b_loc = _b_to[0] # Take the first (lightest)
-        _pos += len(_b_char[0]) # move forward according to lentht of match
-    # matching backward
-    _pos = len(peptide)
-    while _pos > 0:
-        residues = peptide[max(0,_pos-4):_pos]
-        print(f"From pos {_pos} and peak at {peaks[_y_loc]:1.3f} (peak index {_y_loc}) searching string {residues} i.e. the y{len(peptide)-_pos+1}-ion")
-        _y_indeces = [i for i, x in enumerate(f) if x == _y_loc]
-        if len(_y_indeces)==0:
-            print(f"No start of a match for y pos={_pos}, residues={residues}")
-            break
-        # print([c[_ix] for _ix in _y_indeces], [peaks[t[ix]] for ix in _y_indeces ])
-        _y_to = [t[_ix] for _ix in _y_indeces if c[_ix] and residues.endswith(c[_ix])]
-        _y_char = [c[_ix] for _ix in _y_indeces if c[_ix] and residues.endswith(c[_ix])]
-        if len(_y_to)==0:
-            print(f"No match for y pos={_pos}, residues={residues}")
-            break
-        print("y matches ", _y_char, [peaks[ix] for ix in _y_to ])
-        _y_loc = _y_to[0] # Take the first (lightest)
-        _pos -= len(_y_char[0]) # move backward according to length of match
+        print("{_ion_type} matches ", _char, _to, [peaks[ix] for ix in _to ])
+        _loc = _to[0] # Take the first (lightest)
+        _ion_nr += len(_char[0]) # move forward according to length of match
 
-    
+def processSpectra(mzFile, scan2charge, scan2peptide):
+    with mz.read(mzFile) as spectra:
+        for spectrum in spectra:
+            if spectrum["ms level"]==2:
+                scan = spectrum["index"] + 1
+                if scan in scan2charge:
+                    psmPeptide = scan2peptide[scan]
+                    precursor = spectrum["precursorList"]['precursor'][0]['selectedIonList']['selectedIon'][0]
+                    p_mz = float(precursor['selected ion m/z'])
+                    p_z = int(precursor['charge state'])
+                    p_m = (p_mz-mass.Composition({'H+': 1}).mass())*p_z
+                    print("Spectrum {0}, MS level {ms_level} @ RT {scan_time:1.2f}, z={z}, precursor m/z={mz:1.2f} mass={mass:1.2f}".format(
+                        spectrum["id"], ms_level=spectrum["ms level"], scan_time=spectrum["scanList"]["scan"][0]["scan start time"], 
+                        z=p_z, mz=p_mz, mass=p_m ))
+                    print(f"Mattched to {psmPeptide}")
+                    mzarray = spectrum['m/z array']
+                    peaks = mzarray.copy()
+                    _from, _to, _edge_aa, peaks = generate_graph(peaks, p_m, n_term_mass, c_term_mass)
+                    right_path(psmPeptide, _from, _to, _edge_aa, 1, peaks)
+                    right_path(psmPeptide, _from, _to, _edge_aa, -1, peaks)
 
-#print(mass.std_aa_comp)
-#print(mass.std_aa_mass)
+
+scan2charge, scan2peptide = readPSMs(percolatorFile, specFileIndex="0", fdrTreshold=0.01)
+processSpectra(mzFile, scan2charge, scan2peptide)
+quit()
+
+# Well working example spectrum
 with mz.read(mzFile) as spectra:
     for spectrum in spectra:
         # print (spectrum)
@@ -156,6 +182,8 @@ with mz.read(mzFile) as spectra:
                 (sup.spectrum(annotated_spectrum).properties(width=640, height=400)
                        .save('spectrum_iplot.html'))
                 _from, _to, _edge_aa, peaks = generate_graph(peaks, p_m, n_term_mass, c_term_mass)
-                right_path(psmPeptide, _from, _to, _edge_aa, peaks)
+                right_path(psmPeptide, _from, _to, _edge_aa, 1, peaks)
+                right_path(psmPeptide, _from, _to, _edge_aa, -1, peaks)
+                # right_path(psmPeptide, _from, _to, _edge_aa, peaks)
                 # brute_force(b_from, b_to, b_edge_aa)
                 # print(p_m)
