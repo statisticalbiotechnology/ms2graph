@@ -29,9 +29,6 @@ std_aa_mass = dict(sorted({ **single_aa_mass, **double_aa_mass, **tripple_aa_mas
 #std_aa_mass = dict(sorted(single_aa_mass.items(), key=lambda item: item[1]))
 aa_mass = array('d',std_aa_mass.values())
 aa_ix = list(std_aa_mass.keys())
-frag_charge = 1
-n_term_mass = mass.Composition({'H+': frag_charge}).mass()
-c_term_mass = mass.Composition({'O': 1, 'H': 2, 'H+': frag_charge}).mass()
 
 def readPSMs(fileName, specFileIndex="0", fdrTreshold=0.01):
     scan2charge = {}
@@ -64,25 +61,30 @@ def find_diff(difference, tolerance, aa_masses = aa_mass, aa_index = aa_ix):
     return aa_index[ixlo:ixhigh]
     
 
-def generate_graph(mzarray, precursor_mass, n_mass=n_term_mass, c_mass=c_term_mass):
+def generate_graph(mzarray, precursor_mass, series_charge=1):
     #print(mzarray)
-    mzarray = np.insert(mzarray, 0, c_mass)
-    mzarray = np.insert(mzarray, 0, n_mass)
-    mzarray = np.append(mzarray, [precursor_mass + n_mass])
-    mzarray = np.append(mzarray, [precursor_mass + c_mass])
+    n_term_mass = mass.Composition({'H+': series_charge}).mass()
+    c_term_mass = mass.Composition({'O': 1, 'H': 2, 'H+': series_charge}).mass()
+    mzarray = np.insert(mzarray, 0, c_term_mass)
+    mzarray = np.insert(mzarray, 0, n_term_mass)
+    mzarray = np.append(mzarray, [precursor_mass + n_term_mass])
+    mzarray = np.append(mzarray, [precursor_mass + c_term_mass])
     _num_peaks = mzarray.shape[0]
     _from, _to, _edge_aa = [], [], []
     for i in range(_num_peaks-1):
+        _claimed = []
         for j in range(i+1,_num_peaks):
             _diff = mzarray[j] - mzarray[i]
             _aas = find_diff(_diff, fragment_tol_mass*mzarray[j]/1.E6)
             if _aas == None:
                 break
             for _aa in _aas:
-                _from.append(i)
-                _to.append(j)
-                _edge_aa.append(_aa)
-                #print("Peaks {0}, {1} have a mass diff of {2:1.3f}, i.e. a {3} of mass {4:1.3f}".format(mzarray[i], mzarray[j], _diff, chr(_aa), std_aa_mass[aa] ))
+                _previous = [_cl for _cl in _claimed if _aa.beginswith(_cl)]
+                if len(_previous) ==0:
+                    _from.append(i)
+                    _to.append(j)
+                    _edge_aa.append(_aa)
+                    #print("Peaks {0}, {1} have a mass diff of {2:1.3f}, i.e. a {3} of mass {4:1.3f}".format(mzarray[i], mzarray[j], _diff, chr(_aa), std_aa_mass[aa] ))
     return _from, _to, _edge_aa, mzarray
 
 
@@ -146,7 +148,7 @@ def processSpectra(mzFile, scan2charge, scan2peptide):
                     print(f"Mattched to {psmPeptide}")
                     mzarray = spectrum['m/z array']
                     peaks = mzarray.copy()
-                    _from, _to, _edge_aa, peaks = generate_graph(peaks, p_m, n_term_mass, c_term_mass)
+                    _from, _to, _edge_aa, peaks = generate_graph(peaks, p_m, series_charge=1)
                     right_path(psmPeptide, _from, _to, _edge_aa, 1, peaks)
                     right_path(psmPeptide, _from, _to, _edge_aa, -1, peaks)
 
