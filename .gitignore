@@ -1,5 +1,6 @@
 # Project directories
-data/
+data/raw*
+data/converted*
 
 
 # Byte-compiled / optimized / DLL files
