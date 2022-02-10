@@ -1,6 +1,8 @@
 # Project directories
-data/raw*
-data/converted*
+data/raw/*
+data/converted/*
+data/crux/*
+
 
 
 # Byte-compiled / optimized / DLL files
