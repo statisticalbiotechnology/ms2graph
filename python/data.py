@@ -3,7 +3,7 @@ import torch
 from torch_geometric.data import Data
 from torch_geometric import utils
 import networkx as nx
-from ms2graph import process_single_spectrum, processSpectra, readPSMs
+from ms2graph import read_sample_spectrum, processSpectra, readPSMs
 import pyteomics.mzml as mz
 import pyteomics.mass as mass
 from matplotlib import pyplot as plt
@@ -164,18 +164,20 @@ class SpectraDataset():
                 _idx = spectrum_data['idx']
                 self.dataset[_idx] = _spectrum_instance
         print("Dataset loaded (number of spectra = {spectra_num})".
-              format(spectra_num=len(self.dataset[_idx].keys())))
+              format(spectra_num=len(self.dataset.keys())))
 
         # Serialize dataset
         if save_pickled_dataset:
             with open(serialized_dataset, 'wb') as f:
                 pickle.dump(self, f)
-
+            print("Dataset serialized on path : {path_pickle}".
+                  format(path_pickle=serialized_dataset))
 
     @staticmethod
-    def load_pickled_dataset(serialized_dataset="spectra_dataset.pickle"):
+    def load_pickled_dataset(serialized_dataset="../data/serialized/spectra_dataset.pickle"):
         with open(serialized_dataset, 'rb') as f:
             ds = pickle.load(f)
+        print("Dataset Loaded")
         return ds
 
 
@@ -183,7 +185,10 @@ if __name__ == '__main__':
     # Testing of module classes instances
 
     # Dataset Spectrum instance test
-    ds = SpectraDataset()
+    if path.isfile("../data/serialized/spectra_dataset.pickle"):
+        ds = SpectraDataset.load_pickled_dataset()
+    else:
+        ds = SpectraDataset()
 
 
     # Graph Spectrum instance test
@@ -194,7 +199,7 @@ if __name__ == '__main__':
     print(f"Recreate {psmPeptide} with mass {mass.calculate_mass(psmPeptide):1.2f}")
     fragment_tol_mass = 10
     fragment_tol_mode = 'ppm'
-    data = process_single_spectrum(mzScan, mzFile, False,
+    data = read_sample_spectrum(mzScan, mzFile, False,
                                    fragment_tol_mass,
                                    fragment_tol_mode)
     sample_spectrum = Spectrum(data)
