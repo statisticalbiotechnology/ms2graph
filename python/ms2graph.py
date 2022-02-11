@@ -135,28 +135,21 @@ def right_path(peptide, f, t, c, orientation, peaks):
 
 
 def processSpectra(mzFile, scan2charge, scan2peptide):
+    data = [] # return list of dict
     with mz.read(mzFile) as spectra:
         for spectrum in spectra:
             if spectrum["ms level"]==2:
                 scan = spectrum["index"] + 1
                 if scan in scan2charge:
                     psmPeptide = scan2peptide[scan]
-                    precursor = spectrum["precursorList"]['precursor'][0]['selectedIonList']['selectedIon'][0]
-                    p_mz = float(precursor['selected ion m/z'])
-                    p_z = int(precursor['charge state'])
-                    p_m = (p_mz-mass.Composition({'H+': 1}).mass())*p_z
-                    print("Spectrum {0}, MS level {ms_level} @ RT {scan_time:1.2f}, z={z}, precursor m/z={mz:1.2f} mass={mass:1.2f}".format(
-                        spectrum["id"], ms_level=spectrum["ms level"], scan_time=spectrum["scanList"]["scan"][0]["scan start time"], 
-                        z=p_z, mz=p_mz, mass=p_m ))
-                    print(f"Mattched to {psmPeptide}")
-                    mzarray = spectrum['m/z array']
-                    peaks = mzarray.copy()
-                    _from, _to, _edge_aa, peaks = generate_graph(peaks, p_m, series_charge=1)
-                    right_path(psmPeptide, _from, _to, _edge_aa, 1, peaks)
-                    right_path(psmPeptide, _from, _to, _edge_aa, -1, peaks)
+                    spectrum_data = process_single_spectrum(spectrum, psmPeptide)
+                    data.append(spectrum_data)
+    return data
 
 
-def process_sample_spectrum(mzScan, mzFile, plot_spectrum=True,
+
+
+def read_sample_spectrum(mzScan, mzFile, plot_spectrum=True,
                             fragment_tol_mass=fragment_tol_mass,
                             fragment_tol_mode=fragment_tol_mode):
     # Well working example spectrum
@@ -166,54 +159,86 @@ def process_sample_spectrum(mzScan, mzFile, plot_spectrum=True,
             # print (spectrum["scanList"]["scan"][0])
             if spectrum["ms level"]==2:
                 if spectrum["index"]==mzScan-1:
-                    precursor = spectrum["precursorList"]['precursor'][0]['selectedIonList']['selectedIon'][0]
-                    p_mz = float(precursor['selected ion m/z'])
-                    p_z = int(precursor['charge state'])
-                    p_m = (p_mz-mass.Composition({'H+': 1}).mass())*p_z
-                    print("Spectrum {0}, MS level {ms_level} @ RT {scan_time:1.2f}, z={z}, precursor m/z={mz:1.2f} mass={mass:1.2f}".format(
-                        spectrum["id"], ms_level=spectrum["ms level"], scan_time=spectrum["scanList"]["scan"][0]["scan start time"],
-                        z=p_z, mz=p_mz, mass=p_m ))
-                    mzarray = spectrum['m/z array']
-                    peaks = mzarray.copy()
+                    spectrum_data = process_single_spectrum(spectrum)
+                    return spectrum_data
 
-                    # Filter peaks [TODO to be checked]
-                    annotated_spectrum = sus.MsmsSpectrum("my_spectrum", p_mz, p_z,
-                                                          mzarray, spectrum['intensity array'])
-                    annotated_spectrum = (annotated_spectrum.set_mz_range(min_mz=100, max_mz=1400)
-                                          .filter_intensity(min_intensity=0.05, max_num_peaks=50)
-                                          .scale_intensity('root'))
+def process_single_spectrum(spectrum, psmPeptide=None,
+                            compute_right_path=False, plot_spectrum=False,
+                            filter_peaks=True, verbose=True):
+    """
+    Given a spectrum dict (from mzml file) process it generating relative
+    graph, compute right path and plot the spectrum.
 
-                    _from, _to, _edge_aa, peaks = generate_graph(annotated_spectrum.mz,
-                                                                 p_m, series_charge=1,
-                                                                 fragment_tol_mass=fragment_tol_mass,
-                                                                 verbose=False)
-                    if plot_spectrum:
-                        # Plot spectrum with annotation
-                        annotated_spectrum = (annotated_spectrum
-                                              .remove_precursor_peak(fragment_tol_mass,
-                                                                     fragment_tol_mode)
-                                              .annotate_proforma(
-                                                  proforma_str=psmPeptide,
-                                                  fragment_tol_mass=fragment_tol_mass,
-                                                  fragment_tol_mode=fragment_tol_mode,
-                                                  ion_types='by'))
-                        (sup.spectrum(annotated_spectrum).properties(width=640, height=400)
-                         .save('spectrum_iplot.html'))
-                        right_path(psmPeptide, _from, _to, _edge_aa, 1, peaks)
-                        right_path(psmPeptide, _from, _to, _edge_aa, -1, peaks)
-                        # right_path(psmPeptide, _from, _to, _edge_aa, peaks)
-                        # brute_force(b_from, b_to, b_edge_aa)
-                        # print(p_m)
-                    data = {'idx': spectrum['index'],
-                            'mz_array': peaks,
-                            'intensities': annotated_spectrum.intensity,
-                            'p_m': p_m,
-                            'p_z': p_z,
-                            'p_mz': p_mz,
-                            'from': _from,
-                            'to': _to,
-                            'edges_aa': _edge_aa}
-                    return data
+    Parameters
+    ----------
+    spectrum : dict
+        Spectrum dict corresponding to a specific scan
+    psmPeptide : str
+        Peptide sequence match if available
+    compute_right_path : bool
+    plot_spectrum : bool
+    fliter_peaks : bool
+        Perform filtering on peaks ( to be checked / defined better )
+    verbose : bool
+    """
+
+    precursor = spectrum["precursorList"]['precursor'][0]['selectedIonList']['selectedIon'][0]
+    p_mz = float(precursor['selected ion m/z'])
+    p_z = int(precursor['charge state'])
+    p_m = (p_mz-mass.Composition({'H+': 1}).mass())*p_z
+    if verbose:
+        print("Spectrum {0}, MS level {ms_level} @ RT {scan_time:1.2f}, z={z}, precursor m/z={mz:1.2f} mass={mass:1.2f}".format(
+            spectrum["id"], ms_level=spectrum["ms level"], scan_time=spectrum["scanList"]["scan"][0]["scan start time"],
+            z=p_z, mz=p_mz, mass=p_m ))
+        if psmPeptide is not None:
+            print(f"Mattched to {psmPeptide}")
+    mzarray = spectrum['m/z array']
+    peaks = mzarray.copy()
+
+    annotated_spectrum = sus.MsmsSpectrum("my_spectrum", p_mz, p_z,
+                                            mzarray, spectrum['intensity array'])
+
+    # Filter peaks [TODO to be checked]
+    if filter_peaks:
+        annotated_spectrum = (annotated_spectrum.set_mz_range(min_mz=100, max_mz=1400)
+                            .filter_intensity(min_intensity=0.05, max_num_peaks=50)
+                            .scale_intensity('root'))
+
+    _from, _to, _edge_aa, peaks = generate_graph(annotated_spectrum.mz,
+                                                    p_m, series_charge=1,
+                                                    fragment_tol_mass=fragment_tol_mass,
+                                                    verbose=False)
+    if plot_spectrum:
+        # Plot spectrum with annotation
+        annotated_spectrum = (annotated_spectrum
+                                .remove_precursor_peak(fragment_tol_mass,
+                                                        fragment_tol_mode)
+                                .annotate_proforma(
+                                    proforma_str=psmPeptide,
+                                    fragment_tol_mass=fragment_tol_mass,
+                                    fragment_tol_mode=fragment_tol_mode,
+                                    ion_types='by'))
+        (sup.spectrum(annotated_spectrum).properties(width=640, height=400)
+            .save('spectrum_iplot.html'))
+    if compute_right_path:
+        right_path(psmPeptide, _from, _to, _edge_aa, 1, peaks)
+        right_path(psmPeptide, _from, _to, _edge_aa, -1, peaks)
+        # right_path(psmPeptide, _from, _to, _edge_aa, peaks)
+        # brute_force(b_from, b_to, b_edge_aa)
+        # print(p_m)
+
+    data = {'idx': spectrum['index'],
+            'mz_array': peaks,
+            'intensities': annotated_spectrum.intensity,
+            'p_m': p_m,
+            'p_z': p_z,
+            'p_mz': p_mz,
+            'from': _from,
+            'to': _to,
+            'edges_aa': _edge_aa,
+            'peptide_seq': psmPeptide
+            }
+    return data
 
 
 if __name__ == '__main__':
@@ -225,9 +250,9 @@ if __name__ == '__main__':
     psmPeptide = "IANVQSQLEK"
     precursorCharge = 2
 
-    print(f"Recreate {psmPeptide} with mass {mass.calculate_mass(psmPeptide):1.2f}")
-    process_sample_spectrum(mzScan, mzFile)
-    quit()
+    # print(f"Recreate {psmPeptide} with mass {mass.calculate_mass(psmPeptide):1.2f}")
+    # read_sample_spectrum(mzScan, mzFile)
+    # quit()
 
     # Process multiple spectra
     scan2charge, scan2peptide = readPSMs(percolatorFile, specFileIndex="0", fdrTreshold=0.01)

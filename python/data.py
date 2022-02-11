@@ -9,6 +9,8 @@ import pyteomics.mass as mass
 from matplotlib import pyplot as plt
 import seaborn as sns
 import numpy as np
+from os import path
+
 
 
 class Spectrum(object):
@@ -134,6 +136,17 @@ class Spectrum(object):
                                value=self.graph.num_edges / self.graph.num_nodes))
         print(bool_info.format(title="Directed",
                                value=str(self.graph.is_directed())))
+
+
+class SpectraDataset():
+    def __init__(self, mzml_dir="../data/converted/", mzml_files_wildcard="*",
+                 psm_dir="../data/crux/crux-output/", psm_files_wildcard="*",
+                 serialized_dataset="spectra_dataset.pickle"):
+        self.mzml_dir = mzml_dir
+        self.mzml_files_wildcard = mzml_files_wildcard
+        self.psm_dir = mzml_dir
+        self.psm_files_wildcard = mzml_files_wildcard
+
 
 
 if __name__ == '__main__':
