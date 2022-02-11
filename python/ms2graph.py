@@ -7,13 +7,14 @@ import matplotlib.pyplot as plt
 import spectrum_utils.iplot as sup
 import spectrum_utils.spectrum as sus
 import urllib.parse
+import pandas
 
 
 from bisect import *
 from array import *
 
 # Global Variables
-percolatorFile = "../data/crux-output/percolator.target.psms.txt"
+percolatorFile = "../data/crux/crux-output/percolator.target.psms.txt"
 fragment_tol_mass = 10
 fragment_tol_mode = 'ppm'
 single_aa_mass = {aa[0]:comp.mass() for aa, comp in mass.std_aa_comp.items() if len(aa)==1 and aa != 'I'}
@@ -29,14 +30,14 @@ std_aa_mass = dict(sorted({ **single_aa_mass, **double_aa_mass, **tripple_aa_mas
 aa_mass = array('d',std_aa_mass.values())
 aa_ix = list(std_aa_mass.keys())
 
-def readPSMs(fileName, specFileIndex="0", fdrTreshold=0.01):
+def readPSMs(fileName, specFileIndex="0", fdrThreshold=0.01):
     scan2charge = {}
     scan2peptide = {}
     with open(fileName,"r") as reader:
         for line in reader:
             words = line.split('\t')
             if words[0] == specFileIndex:
-                if float(words[7])<=fdrTreshold:
+                if float(words[7])<=fdrThreshold:
                     scan = int(words[1])
                     scan2charge[scan] = int(words[2])
                     scan2peptide[scan] = words[10]
@@ -134,7 +135,7 @@ def right_path(peptide, f, t, c, orientation, peaks):
         _ion_nr += len(_char[0]) # move forward according to length of match
 
 
-def processSpectra(mzFile, scan2charge, scan2peptide):
+def processSpectra(mzFile, scan2charge, scan2peptide, verbose=True):
     data = [] # return list of dict
     with mz.read(mzFile) as spectra:
         for spectrum in spectra:
@@ -142,7 +143,7 @@ def processSpectra(mzFile, scan2charge, scan2peptide):
                 scan = spectrum["index"] + 1
                 if scan in scan2charge:
                     psmPeptide = scan2peptide[scan]
-                    spectrum_data = process_single_spectrum(spectrum, psmPeptide)
+                    spectrum_data = process_single_spectrum(spectrum, psmPeptide, verbose=verbose)
                     data.append(spectrum_data)
     return data
 
@@ -243,18 +244,19 @@ def process_single_spectrum(spectrum, psmPeptide=None,
 
 if __name__ == '__main__':
     # Process sample spectrum
-    print("Processing sample spectrum")
 
     mzFile = "../data/converted/LFQ_Orbitrap_DDA_Yeast_01.mzML"
     mzScan = 32688
     psmPeptide = "IANVQSQLEK"
     precursorCharge = 2
 
+    print("Processing sample spectrum")
     # print(f"Recreate {psmPeptide} with mass {mass.calculate_mass(psmPeptide):1.2f}")
     # read_sample_spectrum(mzScan, mzFile)
     # quit()
 
     # Process multiple spectra
+    print("Processing multiple spectra")
     scan2charge, scan2peptide = readPSMs(percolatorFile, specFileIndex="0", fdrTreshold=0.01)
     processSpectra(mzFile, scan2charge, scan2peptide)
     quit()

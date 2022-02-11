@@ -3,13 +3,15 @@ import torch
 from torch_geometric.data import Data
 from torch_geometric import utils
 import networkx as nx
-from ms2graph import process_sample_spectrum
+from ms2graph import process_single_spectrum, processSpectra, readPSMs
 import pyteomics.mzml as mz
 import pyteomics.mass as mass
 from matplotlib import pyplot as plt
 import seaborn as sns
 import numpy as np
 from os import path
+import pickle
+import glob
 
 
 
@@ -140,17 +142,49 @@ class Spectrum(object):
 
 class SpectraDataset():
     def __init__(self, mzml_dir="../data/converted/", mzml_files_wildcard="*",
-                 psm_dir="../data/crux/crux-output/", psm_files_wildcard="*",
-                 serialized_dataset="spectra_dataset.pickle"):
+                 psm_dir="../data/crux/crux-output/", psm_file="percolator.target.psms.txt",
+                 serialized_dataset="../data/serialized/spectra_dataset.pickle",
+                 save_pickled_dataset=True, fdr_threhold=0.01):
         self.mzml_dir = mzml_dir
         self.mzml_files_wildcard = mzml_files_wildcard
         self.psm_dir = mzml_dir
         self.psm_files_wildcard = mzml_files_wildcard
 
+        # Build dataset
+        self.dataset = {}
+        print(path.join(psm_dir, psm_file))
+        _scan2charge, _scan2peptide = readPSMs(path.join(psm_dir, psm_file),
+                                               fdrThreshold=fdr_threhold)
+        mzml_files = glob.glob(path.join(mzml_dir, mzml_files_wildcard))
+        for mzml_file in mzml_files:
+            print("Analyzing {mzml_file}".format(mzml_file=mzml_file))
+            _ds = processSpectra(mzml_file, _scan2charge, _scan2peptide, verbose=False)
+            for spectrum_data in _ds:
+                _spectrum_instance = Spectrum(spectrum_data)
+                _idx = spectrum_data['idx']
+                self.dataset[_idx] = _spectrum_instance
+        print("Dataset loaded (number of spectra = {spectra_num})".
+              format(spectra_num=len(self.dataset[_idx].keys())))
+
+        # Serialize dataset
+        if save_pickled_dataset:
+            with open(serialized_dataset, 'wb') as f:
+                pickle.dump(self, f)
+
+
+    @staticmethod
+    def load_pickled_dataset(serialized_dataset="spectra_dataset.pickle"):
+        with open(serialized_dataset, 'rb') as f:
+            ds = pickle.load(f)
+        return ds
 
 
 if __name__ == '__main__':
     # Testing of module classes instances
+
+    # Dataset Spectrum instance test
+    ds = SpectraDataset()
+
 
     # Graph Spectrum instance test
     mzFile = "../data/converted/LFQ_Orbitrap_DDA_Yeast_01.mzML"
@@ -160,7 +194,7 @@ if __name__ == '__main__':
     print(f"Recreate {psmPeptide} with mass {mass.calculate_mass(psmPeptide):1.2f}")
     fragment_tol_mass = 10
     fragment_tol_mode = 'ppm'
-    data = process_sample_spectrum(mzScan, mzFile, False,
+    data = process_single_spectrum(mzScan, mzFile, False,
                                    fragment_tol_mass,
                                    fragment_tol_mode)
     sample_spectrum = Spectrum(data)
