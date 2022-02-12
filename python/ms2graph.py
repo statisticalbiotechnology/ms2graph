@@ -9,6 +9,8 @@ import spectrum_utils.spectrum as sus
 import urllib.parse
 import pandas
 
+# PSI peak interpretation specification:
+# https://docs.google.com/document/d/1yEUNG4Ump6vnbMDs4iV4s3XISflmOkRAyqUuutcCG2w/edit?usp=sharing
 
 from bisect import *
 from array import *
@@ -17,18 +19,15 @@ from array import *
 percolatorFile = "../data/crux/crux-output/percolator.target.psms.txt"
 fragment_tol_mass = 10
 fragment_tol_mode = 'ppm'
+max_number_of_aa_considered = 3
 single_aa_mass = {aa[0]:comp.mass() for aa, comp in mass.std_aa_comp.items() if len(aa)==1 and aa != 'I'}
-double_aa_mass = {aa1+aa2:aam1+aam2 for aa1, aam1 in single_aa_mass.items() for aa2, aam2 in single_aa_mass.items()}
-tripple_aa_mass = {aa1+aa2:aam1+aam2 for aa1, aam1 in double_aa_mass.items() for aa2, aam2 in single_aa_mass.items()}
-
-# Quad aa masses makes tha graph probably too dense TODO to be discussed
-# quad_aa_mass = {aa1+aa2:aam1+aam2 for aa1, aam1 in double_aa_mass.items() for aa2, aam2 in double_aa_mass.items()}
-# std_aa_mass = dict(sorted({ **single_aa_mass, **double_aa_mass, **tripple_aa_mass, **quad_aa_mass}.items(), key=lambda item: item[1]))
-
-std_aa_mass = dict(sorted({ **single_aa_mass, **double_aa_mass, **tripple_aa_mass}.items(), key=lambda item: item[1]))
-#std_aa_mass = dict(sorted(single_aa_mass.items(), key=lambda item: item[1]))
-aa_mass = array('d',std_aa_mass.values())
-aa_ix = list(std_aa_mass.keys())
+composite_masses = single_aa_mass.copy()
+all_masses = single_aa_mass.copy()
+for _ in range(1,max_number_of_aa_considered):
+    composite_masses = {aa1+aa2:aam1+aam2 for aa1, aam1 in composite_masses.items() for aa2, aam2 in single_aa_mass.items()}
+    all_masses = dict(sorted({ **all_masses, **composite_masses}.items(), key=lambda item: item[1]))
+aa_mass = array('d',all_masses.values())
+aa_ix = list(all_masses.keys())
 
 def readPSMs(fileName, specFileIndex="0", fdrThreshold=0.01):
     scan2charge = {}
@@ -61,34 +60,49 @@ def find_diff(difference, tolerance, aa_masses = aa_mass, aa_index = aa_ix):
     return aa_index[ixlo:ixhigh]
     
 
-def generate_graph(mzarray, precursor_mass, series_charge=1,
+def generate_graph(mzarray, intensities, precursor_mass, max_series_charge=1,
                    fragment_tol_mass=fragment_tol_mass, verbose=False):
-    #print(mzarray)
-    n_term_mass = mass.Composition({'H+': series_charge}).mass()
-    c_term_mass = mass.Composition({'O': 1, 'H': 2, 'H+': series_charge}).mass()
-    mzarray = np.insert(mzarray, 0, c_term_mass)
-    mzarray = np.insert(mzarray, 0, n_term_mass)
-    mzarray = np.append(mzarray, [precursor_mass + n_term_mass])
-    mzarray = np.append(mzarray, [precursor_mass + c_term_mass])
-    _num_peaks = mzarray.shape[0]
+    virtual_mz =  mzarray.copy()   
+    virtual_intensities =  intensities.copy()  
+
+    # Add virtual fragments at start and end of series coresponding to the mass 
+    # additions to the b/y ion series
+    for charge in range(1,max_series_charge+1):
+        c_term_mz = mass.Composition({'O': 1, 'H': 2, 'H+': charge}).mass()/charge
+        virtual_mz = np.insert(virtual_mz, 0, c_term_mz)
+        virtual_intensities = np.insert(virtual_intensities, 0, -1.)
+        end_mz = precursor_mass/charge + c_term_mz
+        ix = bisect_left(virtual_mz,end_mz)
+        virtual_mz = np.insert(virtual_mz,ix,end_mz)
+        virtual_intensities = np.insert(virtual_intensities,ix,-1.)
+    n_term_mz = mass.Composition({'H+': 1}).mass() # charge indifferent
+    virtual_mz = np.insert(virtual_mz, 0, n_term_mz)
+    virtual_intensities = np.insert(virtual_intensities, 0, -1.)
+    for charge in range(1,max_series_charge+1):
+        end_mz = precursor_mass/charge + n_term_mz
+        ix = bisect_left(virtual_mz,end_mz)
+        virtual_mz = np.insert(virtual_mz,ix,end_mz)
+        virtual_intensities = np.insert(virtual_intensities,ix,-1.)
+    _num_peaks = virtual_mz.shape[0]
     _from, _to, _edge_aa = [], [], []
-    for i in range(_num_peaks-1):
-        _claimed = []
-        for j in range(i+1,_num_peaks):
-            _diff = mzarray[j] - mzarray[i]
-            _aas = find_diff(_diff, fragment_tol_mass*mzarray[j]/1.E6)
-            if _aas == None:
-                break
-            for _aa in _aas:
-                _previous = [_cl for _cl in _claimed if _aa.startswith(_cl)]
-                if len(_previous) == 0:
-                    _from.append(i)
-                    _to.append(j)
-                    _edge_aa.append(_aa)
-                    _claimed.append(_aa)  # TODO to be checked
-                    if verbose:
-                        print("Peaks {0}, {1} have a mass diff of {2:1.3f}, i.e. a {3} of mass {4:1.3f}".format(mzarray[i], mzarray[j], _diff, _aa, std_aa_mass[_aa] ))
-    return _from, _to, _edge_aa, mzarray
+    for charge in range(1,max_series_charge+1):
+        for i in range(_num_peaks-1):
+            _claimed = []
+            for j in range(i+1,_num_peaks):
+                _diff = (virtual_mz[j] - virtual_mz[i])*charge
+                _aas = find_diff(_diff, fragment_tol_mass*virtual_mz[j]*charge/1.E6)
+                if _aas == None:
+                    break
+                for _aa in _aas:
+                    _previous = [_cl for _cl in _claimed if _cl in _aa]
+                    if len(_previous) == 0: # else prune
+                        _from.append(i)
+                        _to.append(j)
+                        _edge_aa.append(_aa)
+                        _claimed.append(_aa)  # TODO to be checked
+                        if verbose:
+                            print("Peaks {0}, {1} have a mass diff of {2:1.3f}, i.e. a {3} of mass {4:1.3f}".format(virtual_mz[i], virtual_mz[j], _diff, _aa, std_aa_mass[_aa] ))
+    return _from, _to, _edge_aa, virtual_mz, virtual_intensities
 
 
 def brute_force(f,t,c,goto=0,peptide=""):
@@ -108,12 +122,13 @@ def oriented_match(long_str, short_str, orientation):
     else:
         return long_str.endswith(short_str)
 
-def right_path(peptide, f, t, c, orientation, peaks):
-    peptide = peptide.replace("I","L")
+def right_path(peptide, f, t, c, orientation, charge, peaks):
+    peptide = peptide.replace("I","L") # These amino acids have identical mass
     _ion_type = "b" if orientation == 1 else "y"
+    _series_mz_offset = mass.Composition({'H+': 1}).mass() if orientation == 1 else mass.Composition({'O': 1, 'H': 2, 'H+': charge}).mass()/charge
     _ion_nr = 1
-    _peak_max = list(set(t))[-2 if orientation ==1 else -1 ] # peak for last b/y-ion
-    _loc = 0 if orientation == 1 else 1
+    _loc = bisect_left(peaks,_series_mz_offset)
+    _peak_max = bisect_left(peaks,_series_mz_offset+(mass.quick_mass(peptide)/charge))
     # matching forward
     while _ion_nr <= len(peptide):
         if orientation == 1:
@@ -184,9 +199,9 @@ def process_single_spectrum(spectrum, psmPeptide=None,
     """
 
     precursor = spectrum["precursorList"]['precursor'][0]['selectedIonList']['selectedIon'][0]
-    p_mz = float(precursor['selected ion m/z'])
-    p_z = int(precursor['charge state'])
-    p_m = (p_mz-mass.Composition({'H+': 1}).mass())*p_z
+    p_mz = float(precursor['selected ion m/z']) # Measured mass to charge ratio of peptide
+    p_z = int(precursor['charge state']) # Precursor charge
+    p_m = (p_mz-mass.Composition({'H+': 1}).mass())*p_z # Mass of precursor
     if verbose:
         print("Spectrum {0}, MS level {ms_level} @ RT {scan_time:1.2f}, z={z}, precursor m/z={mz:1.2f} mass={mass:1.2f}".format(
             spectrum["id"], ms_level=spectrum["ms level"], scan_time=spectrum["scanList"]["scan"][0]["scan start time"],
@@ -194,6 +209,7 @@ def process_single_spectrum(spectrum, psmPeptide=None,
         if psmPeptide is not None:
             print(f"Mattched to {psmPeptide}")
     mzarray = spectrum['m/z array']
+    intensities = spectrum['intensity array']
     peaks = mzarray.copy()
 
     annotated_spectrum = sus.MsmsSpectrum("my_spectrum", p_mz, p_z,
@@ -205,8 +221,8 @@ def process_single_spectrum(spectrum, psmPeptide=None,
                             .filter_intensity(min_intensity=0.05, max_num_peaks=50)
                             .scale_intensity('root'))
 
-    _from, _to, _edge_aa, peaks = generate_graph(annotated_spectrum.mz,
-                                                    p_m, series_charge=1,
+    _from, _to, _edge_aa, peaks, intensities = generate_graph(annotated_spectrum.mz,annotated_spectrum.intensity,
+                                                    p_m, 1,
                                                     fragment_tol_mass=fragment_tol_mass,
                                                     verbose=False)
     if plot_spectrum:
@@ -222,15 +238,15 @@ def process_single_spectrum(spectrum, psmPeptide=None,
         (sup.spectrum(annotated_spectrum).properties(width=640, height=400)
             .save('spectrum_iplot.html'))
     if compute_right_path:
-        right_path(psmPeptide, _from, _to, _edge_aa, 1, peaks)
-        right_path(psmPeptide, _from, _to, _edge_aa, -1, peaks)
+        right_path(psmPeptide, _from, _to, _edge_aa, 1, 1, peaks)
+        right_path(psmPeptide, _from, _to, _edge_aa, -1, 1, peaks)
         # right_path(psmPeptide, _from, _to, _edge_aa, peaks)
         # brute_force(b_from, b_to, b_edge_aa)
         # print(p_m)
 
     data = {'idx': spectrum['index'],
             'mz_array': peaks,
-            'intensities': annotated_spectrum.intensity,
+            'intensities': intensities,
             'p_m': p_m,
             'p_z': p_z,
             'p_mz': p_mz,
@@ -257,6 +273,6 @@ if __name__ == '__main__':
 
     # Process multiple spectra
     print("Processing multiple spectra")
-    scan2charge, scan2peptide = readPSMs(percolatorFile, specFileIndex="0", fdrTreshold=0.01)
+    scan2charge, scan2peptide = readPSMs(percolatorFile, "0", 0.01)
     processSpectra(mzFile, scan2charge, scan2peptide)
     quit()
