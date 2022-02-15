@@ -53,10 +53,6 @@ class Spectrum(object):
         self.mz_array = data['mz_array']
 
         self.intensities = data['intensities']
-        self.intensities = np.insert(self.intensities, 0, 0)  # c term
-        self.intensities = np.insert(self.intensities, 0, 0)  # n term
-        self.intensities = np.append(self.intensities, 0)  # precursor + c term
-        self.intensities = np.append(self.intensities, 0)  # precursor + n term
 
         self.precursor = {'m': data['p_m'], 'z': data['p_z'], 'mz':
                           data['p_mz']}
@@ -118,6 +114,17 @@ class Spectrum(object):
         nx.draw_networkx(nx_graph, pos=pos)
         plt.show()
 
+    def get_stats(self):
+        data = {}
+        data['num_nodes'] = self.graph.num_nodes
+        data['num_edges'] = self.graph.num_edges
+        data['isolated_nodes'] = int(self.graph.has_isolated_nodes())
+        data['avg_node_degree'] = float(self.graph.num_edges /
+                                        self.graph.num_nodes)
+        data['peptide_seq_len'] = len(self.peptide_seq)
+        data['seq_len_node_ratio'] = self.graph.num_nodes / len(self.peptide_seq)
+        return data
+
     def print_stats(self):
         """
         Print basic information about the graph.
@@ -170,8 +177,31 @@ class SpectraDataset():
         if save_pickled_dataset:
             with open(serialized_dataset, 'wb') as f:
                 pickle.dump(self, f)
-            print("Dataset serialized on path : {path_pickle}".
+                print("Dataset serialized on path : {path_pickle}".
                   format(path_pickle=serialized_dataset))
+
+    def print_stats(self):
+        int_info = "{title:17} = {value:5d}"
+        float_info = "{title:25} = {value:3.2f}"
+        bool_info = "{title:17} = {value:5}"
+
+        # Retrieve stats from spectrum/graphs and compute mean
+        stats_list = [graph.get_stats() for graph in self.dataset.values()]
+        avg_nodes = sum(data['num_nodes'] for data in stats_list) / len(stats_list)
+        avg_edges = sum(data['num_edges'] for data in stats_list) / len(stats_list)
+        avg_node_degree = sum(data['avg_node_degree'] for data in stats_list) / len(stats_list)
+        avg_peptide_seq_len = sum(data['peptide_seq_len'] for data in stats_list) / len(stats_list)
+        avg_node_seq_len_ratio = sum(data['seq_len_node_ratio'] for data in stats_list) / len(stats_list)
+
+
+
+        print(int_info.format(title="Number of spectra", value=len(self.dataset.keys())))
+        print(float_info.format(title="Average nodes number", value=avg_nodes))
+        print(float_info.format(title="Average edges number", value=avg_edges))
+        print(float_info.format(title="Average nodes degree", value=avg_node_degree))
+        print(float_info.format(title="Average peptide seq len", value=avg_peptide_seq_len))
+        print(float_info.format(title="Avg node/seq_len ratio", value=avg_node_seq_len_ratio))
+
 
     @staticmethod
     def load_pickled_dataset(serialized_dataset="../data/serialized/spectra_dataset.pickle"):
@@ -184,14 +214,17 @@ class SpectraDataset():
 if __name__ == '__main__':
     # Testing of module classes instances
 
-    # Dataset Spectrum instance test
+    # Dataset Spectra instance test
+    print("Dataset Spectra instance test")
     if path.isfile("../data/serialized/spectra_dataset.pickle"):
         ds = SpectraDataset.load_pickled_dataset()
     else:
         ds = SpectraDataset()
+    ds.print_stats()
 
 
     # Graph Spectrum instance test
+    print("\n\n Graph Instance Test")
     mzFile = "../data/converted/LFQ_Orbitrap_DDA_Yeast_01.mzML"
     mzScan = 32688
     psmPeptide = "IANVQSQLEK"
