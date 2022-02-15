@@ -3,7 +3,7 @@ data/raw/*
 data/converted/*
 data/crux/*
 data/serialized/*
-
+python/*.html
 
 
 # Byte-compiled / optimized / DLL files

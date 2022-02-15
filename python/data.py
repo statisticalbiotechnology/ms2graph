@@ -86,12 +86,11 @@ class Spectrum(object):
         assert len(_from) == len(_to) == len(_edges)
         num_nodes = len(self.mz_array)
         edge_index = torch.tensor([_from, _to], dtype=torch.float)
-
+        x = torch.tensor(self.mz_array, dtype=torch.float).unsqueeze(1)
         if use_intensities and self.intensities is not None:
             assert len(self.intensities) == num_nodes
-            x = torch.tensor(self.intensities, dtype=torch.float)
-        else:
-            x = torch.tensor(range(num_nodes), dtype=torch.float)
+            x_intensities = torch.tensor(self.intensities, dtype=torch.float).unsqueeze(1)
+            x = torch.cat([x, x_intensities], dim=1)
 
         graph = Data(x=x, edge_index=edge_index)
         return graph
