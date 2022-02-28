@@ -16,11 +16,11 @@ class GNN2SeqWrapper(BaseModelWrapper):
         self.device = torch.device('cuda' if torch.cuda.is_available() and cuda else 'cpu')
         self.model = self.model.to(self.device)
         print(sum(param.numel() for param in self.model.parameters()))
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.0001)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.0001, amsgrad=True)
         self.loss = torch.nn.CrossEntropyLoss()
 
 
-    def fit(self, data, epochs=10000, valid_split_size=None, max_len_pred=None):
+    def fit(self, data, epochs=10000, minibatch_size=32, valid_split_size=None, max_len_pred=None):
         # Assert target presence
         for graph in data:
             assert graph.y is not None
@@ -43,7 +43,7 @@ class GNN2SeqWrapper(BaseModelWrapper):
                 _n_steps=max_len_pred
             for i, x in enumerate(data):
                 data[i].y = x.y[:_n_steps]
-            loader = DataLoader(data, batch_size=3, shuffle=True)
+            loader = DataLoader(data, batch_size=minibatch_size, shuffle=True)
             for i, data_batch in enumerate(loader):
                 self.optimizer.zero_grad()
                 data_batch.to(self.device)
@@ -70,7 +70,7 @@ class GNN2SeqWrapper(BaseModelWrapper):
 if __name__ ==  '__main__':
     # Test models prototypes
     print("Loading Spectra Dataset")
-    pickle_dataset = "../data/serialized/spectra_dataset_200_noclaim.pickle")
+    pickle_dataset = "../data/serialized/spectra_dataset_200_noclaim.pickle"
     if path.isfile(pickle_dataset):
         ds = SpectraDataset.load_pickled_dataset(pickle_dataset)
     else:
@@ -81,5 +81,5 @@ if __name__ ==  '__main__':
     print("Training vectors of length : {length} retrieved".format(length=len(data)))
 
     model_gnn = GNN2SeqWrapper()
-    model_gnn.fit(data, max_len_pred=3)
+    model_gnn.fit(data, minibatch_size=4, max_len_pred=4)
     pass

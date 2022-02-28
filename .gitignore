@@ -4,6 +4,7 @@ data/converted/*
 data/crux/*
 data/serialized/*
 python/*.html
+results/*
 
 
 # Byte-compiled / optimized / DLL files
