@@ -5,6 +5,7 @@ data/crux/*
 data/serialized/*
 python/*.html
 results/*
+models/*
 
 
 # Byte-compiled / optimized / DLL files
